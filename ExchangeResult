@@ -1,12 +1,16 @@
 USE [AnalysisDB]
 GO
 
-/****** Object:  View [Advanced_Analyst].[ExchangeResult]    Script Date: 2026/3/6 下午 04:30:25 ******/
+/****** Object:  View [Advanced_Analyst].[ExchangeResult]    Script Date: 2026/3/6 下午 08:50:06 ******/
 SET ANSI_NULLS ON
 GO
 
 SET QUOTED_IDENTIFIER ON
 GO
+
+
+
+
 
 
 
@@ -23,84 +27,88 @@ AS
 WITH FilteredPurchase AS (
     -- 核心優化：不要在 SELECT 裡 CAST 欄位，保留原始格式供後續 JOIN 使用
     SELECT 
-        PurchaseDate,
-        BranchNo,
-        SoldBy,
-        CustomerName,
-        CustomerBirthday, 
-        PurchaseNo,
-        PurchaseItemNo,
-        ProductKeyNo,
-        TreatmentCategory, 
-        Total_Number,
-        [Total_Number(Convertion)],
-        [Total_Number(Convertion_Goods)],
-        ANo,
-        TreatmentItem,
-        Product_Name,
-        SoldOutPrice
-    FROM [Advanced_Analyst].[PurchaseDetail]
-    -- 核心優化：保持欄位純淨，確保索引生效
+        p.PurchaseDate,
+        p.BranchNo,
+        p.SoldBy,
+        p.CustomerName,
+        p.CustomerBirthday, 
+        p.PurchaseNo,
+        p.PurchaseItemNo,
+        p.ProductKeyNo,
+        p.TreatmentCategory, 
+        p.TreatmentItem,
+        p.Product_Name,
+        p.Total_Number,
+        p.[Total_Number(Convertion)],
+        p.[Total_Number(Convertion_Goods)],
+        p.ANo,
+        p.SoldOutPrice,
+        m.IsPrivate
+    FROM [Advanced_Analyst].[PurchaseDetail] p
+    LEFT JOIN ProductMappingInfo m
+    ON p.ProductKeyNo = m.ProductKeyNo
     WHERE PurchaseDate >= DATEADD(YEAR, DATEDIFF(YEAR, 0, GETDATE()) - 1, 0)
 ),
 
 --可能要加回的換貨
 AfterExchange AS (
     SELECT 
-    s.PurchaseDate,
-    s.BelongToLoginUser,
-    s.CustomerName,
-    s.RewardAmout,
-    d.CustomerBirthday,
-    d.BranchNo,
-    s.RewardDate,
-    d.PurchaseNo,
-    d.PurchaseItemNo,
-    d.ProductKeyNo,
-    d.TreatmentCategory,
-    d.TreatmentItem,
-    d.Product_Name,
-    d.Total_Number,
-    m.IsPrivate
+        s.PurchaseDate,
+        s.BelongToLoginUser,
+        s.CustomerName,
+        s.RewardAmout,
+        d.CustomerBirthday,
+        d.BranchNo,
+        s.RewardDate,
+        d.PurchaseNo,
+        d.PurchaseItemNo,
+        d.ProductKeyNo,
+        d.TreatmentCategory,
+        d.TreatmentItem,
+        d.Product_Name,
+        d.[Total_Number(Convertion)],
+        m.IsPrivate
     FROM SaintEir_SaleReward s
     INNER JOIN FilteredPurchase d 
-    ON s.BelongToPurchase = d.PurchaseNo
-    AND s.BelongToProduct = d.ProductKeyNo
+        ON s.BelongToPurchase = d.PurchaseNo
+        AND s.BelongToProduct = d.ProductKeyNo
     LEFT JOIN ProductMappingInfo m
-    ON d.ProductKeyNo = m.ProductKeyNo
+        ON d.ProductKeyNo = m.ProductKeyNo
     WHERE s.RewardAmout = 0
-    AND s.RewardDate IS NULL
-    AND d.Ano = '0'
-    AND (d.TreatmentItem IN ('微整-蒙娜麗莎','高雷-IG電波','高雷-Z音波','高雷-Micools','高雷-Coresculpt核心肌塑')
-    OR d.Product_Name IN ('璀瑟intime-清新噴霧50ml','璀瑟ROYALE-皇家金萃修護安瓶 - 8ml','璀瑟 ROYALE-皇家金萃修護安瓶 - 8ml (方)','雪妍萃EX'))
+      AND s.RewardDate IS NULL
+      AND d.Ano = '0'
+      AND (d.TreatmentItem IN ('微整-蒙娜麗莎','高雷-IG電波','高雷-Z音波','高雷-Micools','高雷-Coresculpt核心肌塑')
+           OR d.Product_Name IN ('璀瑟intime-清新噴霧50ml','璀瑟ROYALE-皇家金萃修護安瓶 - 8ml','璀瑟 ROYALE-皇家金萃修護安瓶 - 8ml (方)','雪妍萃EX'))
 ),
 
 --換貨路徑
 ExchangeProcess AS (
     SELECT 
-    d0.PurchaseDate AS BeforeExchangepurchaseDate,
-    d0.BranchNo AS BeforeExchangeBranchNo,
-    d0.SoldBy AS BeforeExchangeUserId,
-    d0.CustomerName AS BeforeExchangeCustomerName,
-    d0.CustomerBirthday AS BeforeExchangeCustomerBirthday,
-    d0.PurchaseNo AS BeforeExchangePurchaseNo,
-    d0.PurchaseItemNo AS BeforeExchangepurchaseItemNo,
-    d0.ProductKeyNo AS BeforeExchangeProductKeyNo,
-    d0.TreatmentItem AS BeforeExchangeTreatmentItem,
-    d0.Product_Name AS BeforeExchangeProductName,
-    d0.[Total_Number(Convertion)] AS BeforeExchangeQty,
-    g.Quantity AS ExchangeQuantity,
-    d2.PurchaseDate AS AfterExchangepurchaseDate,
-    d2.BranchNo AS AfterExchangeBranchNo,
-    d2.SoldBy AS AfterExchangeUserId,
-    d2.CustomerName AS AfterExchangeCustomerName,
-    d2.CustomerBirthday AS AfterExchangeCustomerBirthday,
-    d2.PurchaseNo AS AfterExchangePurchaseNo,
-    d2.PurchaseItemNo AS AfterExchangepurchaseItemNo,
-    d2.ProductKeyNo AS AfterExchangeProductKeyNo,
-    d2.TreatmentItem AS AfterExchangeTreatmentItem,
-    d2.Product_Name AS AfterExchangeProductName,
-    d2.[Total_Number(Convertion)] AS AfterExchangeQty
+        d0.PurchaseDate AS BeforeExchangePurchaseDate,
+        d0.BranchNo AS BeforeExchangeBranchNo,
+        d0.SoldBy AS BeforeExchangeUserId,
+        d0.CustomerName AS BeforeExchangeCustomerName,
+        d0.CustomerBirthday AS BeforeExchangeCustomerBirhday,
+        d0.PurchaseNo AS BeforeExchangePurchaseNo,
+        d0.PurchaseItemNo AS BeforeExchangePurchaseItemNo,
+        d0.ProductKeyNo AS BeforeExchangeProductKeyNo,
+        d0.TreatmentCategory AS BeforeExchangeTreatmentCategory,
+        d0.TreatmentItem AS BeforeExchangeTreatmentItem,
+        d0.Product_Name AS BeforeExchangeProductName,
+        d0.[Total_Number(Convertion)] AS BeforeExchangeQty,
+        --g.Quantity AS ExchangeQuantity,
+        d2.PurchaseDate AS AfterExchangePurchaseDate,
+        d2.BranchNo AS AfterExchangeBranchNo,
+        d2.SoldBy AS AfterExchangeUserId,
+        d2.CustomerName AS AfterExchangeCustomerName,
+        d2.CustomerBirthday AS AfterExchangeCustomerBirhday,
+        d2.PurchaseNo AS AfterExchangePurchaseNo,
+        d2.PurchaseItemNo AS AfterExchangePurchaseItemNo,
+        d2.ProductKeyNo AS AfterExchangeProductKeyNo,
+        d2.TreatmentCategory AS AfterExchangeTreatmentCategory,
+        d2.TreatmentItem AS AfterExchangeTreatmentItem,
+        d2.Product_Name AS AfterExchangeProductName,
+        d2.[Total_Number(Convertion)] AS AfterExchangeQty
     FROM SaintEir_GoodsExchange g
     INNER JOIN FilteredPurchase d0 ON g.BelongToProduct = d0.ProductKeyNo AND g.BelongToPurchaseItem = d0.PurchaseItemNo
     LEFT JOIN SaintEir_Credit c ON g.BelongToPurchase = c.BelongToPurchase
@@ -109,52 +117,29 @@ ExchangeProcess AS (
     LEFT JOIN FilteredPurchase d2 ON pc.PurchaseItemTo = d2.PurchaseItemNo
 ),
 
-ExchangeResult_Base AS (
-SELECT
-ep.*,
-a.IsPrivate,
---1：同月換貨；0：跨月換貨
-CASE WHEN DATEDIFF(MONTH, ep.BeforeExchangePurchaseDate, ep.AfterExchangePurchaseDate) = 0 THEN 1 ELSE 0 END AS Same_month,
-ROW_NUMBER() OVER (
-PARTITION BY ep.AfterExchangepurchaseItemNo
-ORDER BY ep.BeforeExchangePurchaseDate DESC
-) AS RowNum
-FROM AfterExchange a
-INNER JOIN ExchangeProcess ep
-    ON a.PurchaseItemNo = ep.AfterExchangePurchaseItemNo
+--換貨結果
+ExchangeResult AS (
+    SELECT *
+    FROM(SELECT
+        a.PurchaseDate,
+        ep.*,
+        -- 優化：使用 DATEDIFF 判斷同月更精準（考慮跨年情況）
+        CASE WHEN DATEDIFF(MONTH, ep.BeforeExchangePurchaseDate, ep.AfterExchangePurchaseDate) = 0 THEN 1 ELSE 0 END AS Same_month,
+        -- 核心優化：為每筆換貨標記順序，取代 NOT EXISTS
+        ROW_NUMBER() OVER (
+            PARTITION BY a.PurchaseItemNo 
+            ORDER BY ep.BeforeExchangePurchaseDate DESC
+        ) AS RowNum,
+        a.IsPrivate AS AfterExchangeIsPrivate
+    FROM AfterExchange a
+    INNER JOIN ExchangeProcess ep
+        ON a.PurchaseItemNo = ep.AfterExchangePurchaseItemNo
+        ) AS ExchangeResult_Base
+    WHERE RowNum = 1
 )
 
--- 最終輸出：只取 RowNum = 1 (即最後一次換貨紀錄)
-SELECT DISTINCT
-    er.BeforeExchangePurchaseDate,
-    er.BeforeExchangePurchaseNo,
-    er.BeforeExchangepurchaseItemNo,
-    er.BeforeExchangeBranchNo,
-    er.BeforeExchangeUserId,
-    u1.FullNameInChinese AS BeforeExchangeSoldbyName,
-    er.BeforeExchangeCustomerName,
-    er.BeforeExchangeCustomerBirthday,
-    er.BeforeExchangeProductName,
-    er.BeforeExchangeQty,
-    er.ExchangeQuantity,
-    er.AfterExchangePurchaseDate,
-    er.AfterExchangePurchaseNo,
-    er.AfterExchangepurchaseItemNo,
-    er.AfterExchangeBranchNo,
-    er.AfterExchangeUserId,
-    u2.FullNameInChinese AS AfterExchangeSoldName,
-    er.AfterExchangeCustomerName,
-    er.AfterExchangeCustomerBirthday,
-    er.AfterExchangeProductName,
-    er.AfterExchangeQty,
-    er.Same_month,
-    er.IsPrivate
-FROM ExchangeResult_Base er
--- 第一次 JOIN：對應換貨前人員
-INNER JOIN PRO2E_AUTH_LOGIN_USER u1 
-    ON er.BeforeExchangeUserId = u1.UserId
--- 第二次 JOIN：對應換貨後人員 (建議用 LEFT JOIN 避免若人員資料缺失導致整筆消失)
-LEFT JOIN PRO2E_AUTH_LOGIN_USER u2 
-    ON er.AfterExchangeUserId = u2.UserId
---WHERE AfterExchangeCustomerName = '楊純宜'
+SELECT *
+FROM ExchangeResult
 GO
+
+
