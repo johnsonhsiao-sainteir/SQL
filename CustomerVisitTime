@@ -1,0 +1,60 @@
+USE [AnalysisDB]
+GO
+
+/****** Object:  View [Advanced_Analyst].[CustomerVisitTime]    Script Date: 2026/3/6 下午 09:02:19 ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+
+
+
+
+
+ALTER VIEW [Advanced_Analyst].[CustomerVisitTime]
+AS
+
+SELECT DISTINCT
+  BelongtoBranch,
+  ReservationNo,
+  r.CustomerName,
+  r.StartTime,
+  r.EndTime,
+  CAST(h.HourValue AS NVARCHAR(2)) + '點' AS 時段判斷 
+FROM
+    [dbo].[SaintEir_Reservation] AS r
+LEFT JOIN
+    [dbo].[V_PRO2E_AUTH_USER_IN_ROLE] AS p
+    ON r.ByResource = p.UserId
+CROSS JOIN  
+    (
+        SELECT 10 AS HourValue
+        UNION ALL SELECT 11
+        UNION ALL SELECT 12
+        UNION ALL SELECT 13
+        UNION ALL SELECT 14
+        UNION ALL SELECT 15
+        UNION ALL SELECT 16
+        UNION ALL SELECT 17
+        UNION ALL SELECT 18
+        UNION ALL SELECT 19
+        UNION ALL SELECT 20
+    ) AS h
+WHERE
+    1=1
+    AND IsArrived = 1
+    AND r.StartTime >= DATEADD(month, -3, GETDATE()) -- 20260213縮短為近3個月
+    --AND CAST(r.StartTime AS DATE) <= CAST(GETDATE() AS DATE)
+    AND r.StartTime < DATEADD(HOUR, h.HourValue + 1, CAST(CAST(r.StartTime AS DATE) AS DATETIME))
+    AND r.EndTime > DATEADD(HOUR, h.HourValue, CAST(CAST(r.StartTime AS DATE) AS DATETIME))
+    AND BelongToBranch IN('SE01','SE03','SE04','SE05','SE08','SE09','SE12')
+    AND RoleName = '基本權限(SE)'
+    AND Flag = 1
+    AND FollowOn = 0
+    
+    
+GO
+
+
