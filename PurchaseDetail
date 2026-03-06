@@ -1,0 +1,347 @@
+USE [AnalysisDB]
+GO
+
+/****** Object:  View [Advanced_Analyst].[PurchaseDetail]    Script Date: 2026/3/6 下午 09:03:25 ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+
+
+
+
+
+
+
+
+
+
+
+
+--CREATE VIEW [Advanced_Analyst].[PurchaseDetail]
+--AS
+
+ALTER VIEW [Advanced_Analyst].[PurchaseDetail]
+AS
+
+WITH G1 AS (		
+	select 
+		BelongToPurchaseItem
+		,BelongToProduct
+		--,--BelongToCredit --20260205刪除
+		,sum(ProductWorth) GoodsExchangeProductWorth 
+		,sum(Quantity) AS GoodsExchangeProductQuantity 
+	from SaintEir_GoodsExchange 
+	where flag=1
+	group by BelongToPurchaseItem ,BelongToProduct--,BelongToCredit
+	),
+	H1 AS (  
+		select 
+			BelongToPurchaseItem
+			,BelongToProduct
+			--sum(ProductWorth) GoodsRefundProductWorth ,	sum(Credit)GoodsRefundCredit  
+			,( case   when sum(ProductWorth)  is null  then 0 else  sum(ProductWorth) end ) AS GoodsRefundProductWorth
+			,( case   when sum(Quantity)  is null  then 0 else  sum(Quantity) end ) AS GoodsRefundQuantity
+		from SaintEir_GoodsRefund  
+		where flag=1
+		group by BelongToPurchaseItem, BelongToProduct
+	 ) 
+/*
+,Consumption AS (
+	Select 
+		CAST(c.ConsumptionHistoryNo as nvarchar) as ConsumptionHistoryNo
+		,CAST(c.ConsumptionDate as date) as ConsumptionDate
+		,CAST(c.BelongToPurchaseItem as nvarchar) as BelongToPurchaseItem
+		,CAST(c.ConsumptionProduct as nvarchar) as ConsumptionProduct
+		,map.TreatmentCategory
+		,c.ByDr
+		,u.FullNameInChinese as DrName
+	From 
+		SaintEir_ComsumptionHistory c
+		Left Join PRO2E_AUTH_LOGIN_USER u ON u.UserId=c.ByDr 
+		Left Join ProductMappingInfo map ON map.ProductKeyNo=c.ConsumptionProduct 
+	WHERE 1=1
+		and c.Flag=1
+		AND map.TreatmentCategory = '手術'
+	Order By c.ConsumptionDate DESC
+)
+*/
+
+Select
+	--p.*
+	--,
+	CAST(p.[PurchaseNo] AS NVARCHAR(50)) as PurchaseNo
+	,p.CustomerName
+	,p.BelongToInProcess
+	,p.[CreatedDate]
+	,p.[PurchaseDate]
+	,p.[ANo]
+	,p.[ByMember]
+	,m.Birthday as CustomerBirthday
+	--,p.[BelongToBranch]
+	,b.[Name] as "Branch_Name"
+	,b.BranchNo
+	,CAST(pi.[PurchaseItemNo] AS NVARCHAR(50)) AS PurchaseItemNo
+	,CAST(pi.[PurchasePackage] AS NVARCHAR(50)) AS PurchasePackage
+	,CAST(pi.[PurchaseProduct] AS NVARCHAR(50)) AS PurchaseProduct
+	,pi.[SellPrice]
+	--,pa.[PackageKeyNo]
+	,pa.[NameInChinese] as Package_Name
+	,pa.PackageKeyNo
+	,pa.[PackageNo] as PackageNo
+	--,pai.[BelongToPackage]
+	,CAST(pro.[ProductNo] AS NVARCHAR(50)) AS ProductNo
+	,CAST(pro.[ProductKeyNo]  AS NVARCHAR(50)) AS ProductKeyNo
+	,pro.[NameInChinese] as Product_Name
+	,pro.[unit] as "ProductUnit"
+	,pro.[Price] as Unit_Product_Price
+	,map.TreatmentCategory
+	,map.TreatmentItem
+	/*
+	,CASE
+		WHEN map.TreatmentCategory = '手術' 
+		THEN Consumption.ByDr
+		ELSE null
+		END AS Surgical_ConsumptionByDr
+	,CASE
+		WHEN map.TreatmentCategory = '手術' 
+		THEN Consumption.DrName
+		ELSE null
+		END AS Surgical_ConsumptionDrName
+	,CASE
+		WHEN map.TreatmentCategory = '手術' 
+		THEN Consumption.ConsumptionDate
+		ELSE null
+		END AS Surgical_ConsumptionDate
+		*/
+
+	,map.PlasticSurgeryCategory as "手術分類"
+	,map.PlasticSurgeryItem as "手術項目"
+	,map.MinimallyInvasiveCategory as "微整分類"
+	,pi.[Quantity] as "#_of_PurchaseItem"
+	,pai.[Quantity] as "#_Product_per_package"
+	,CASE
+		WHEN 
+			map.TreatmentCategory = '手術' 
+			AND CAST(p.[ANo] AS NVARCHAR(50)) = '0'
+		THEN 0.0
+		ELSE
+			CAST(
+				COALESCE(
+						pi.[Quantity]*pai.[Quantity]
+						,pi.[Quantity] 
+				)AS float)
+	END as Total_Number
+	,map.UnitConversion
+	,CASE
+		WHEN 
+			map.TreatmentCategory = '手術' 
+			AND CAST(p.[ANo] AS NVARCHAR(50)) = '0'
+		THEN 0.0
+		WHEN pi.[SoldOutPrice]<=0 -- 排除SoldOutPrice=0
+		THEN 0.0
+		ELSE
+			CAST(
+				COALESCE(
+						pi.[Quantity]*pai.[Quantity]
+						,pi.[Quantity] 
+				)AS float)
+	END / COALESCE(map.UnitConversion, 1) as"Total_Number(Convertion)" --不包含換貨 --20260120 更新邏輯 COALESCE(map.UnitConversion, 1)
+	
+	,CASE
+		WHEN 
+			map.TreatmentCategory = '手術' 
+			AND CAST(p.[ANo] AS NVARCHAR(50)) = '0'
+		THEN 0.0
+		WHEN pi.[SoldOutPrice]<=0 -- 排除SoldOutPrice=0
+		THEN 0.0
+		ELSE
+			CAST(
+				COALESCE(
+						pi.[Quantity]*pai.[Quantity]
+						,pi.[Quantity] 
+				)AS float)
+	END / COALESCE(map.UnitConversion, 1) as"Total_Number(Convertion)_v2" -- 包含換貨 --20260120 更新邏輯 COALESCE(map.UnitConversion, 1)
+
+	,(CASE
+		WHEN 
+			map.TreatmentCategory = '手術' 
+			AND CAST(p.[ANo] AS NVARCHAR(50)) = '0'
+		THEN 0.0
+		WHEN pi.[SoldOutPrice]<=0 -- 排除SoldOutPrice=0
+		THEN 0.0
+		ELSE
+			CAST(
+				COALESCE(
+						pi.[Quantity]*pai.[Quantity]
+						,pi.[Quantity] 
+				)AS float)
+			-isnull(H1.GoodsRefundQuantity,0)--扣除退貨
+			-isnull(G1.GoodsExchangeProductQuantity ,0) --扣除換貨
+	END)
+	/ COALESCE(map.UnitConversion, 1) as"Total_Number(Convertion_Goods)" -- 包含換貨 --20260120 更新邏輯 COALESCE(map.UnitConversion, 1)
+
+	,pi.[SoldOutPrice]
+	,pa.[PackagePrice]
+	,p.[IsCompleted]
+	,pai.[ItemValue]
+------------------------------------------------------------------------------------
+------------------------------------------------------------------------------------
+	,CASE
+		WHEN 
+			map.TreatmentCategory = '手術' 
+			AND CAST(p.[ANo] AS NVARCHAR(50)) = '0'
+			THEN 0
+		WHEN pi.[SoldOutPrice]=0 then 0
+		WHEN pa.[PackagePrice] = 0 THEN 0
+		ELSE
+		COALESCE(
+				(pi.[SoldOutPrice]/pa.[PackagePrice])*pai.[ItemValue]
+				,pi.[SoldOutPrice]
+		)
+	END as "SoldOutPriceByProduct"
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+	,CASE
+		WHEN 
+			map.TreatmentCategory = '手術' 
+			AND CAST(p.[ANo] AS NVARCHAR(50)) = '0'
+			THEN 0
+		WHEN pi.[SoldOutPrice]=0 then 0
+		WHEN pa.[PackagePrice] = 0 THEN 0
+		ELSE
+			COALESCE(
+					(pi.[SoldOutPrice]/pa.[PackagePrice])*pai.[ItemValue]
+					,pi.[SoldOutPrice]
+			)
+			-isnull(H1.GoodsRefundProductWorth,0) --扣掉退貨 
+	END as "SoldOutPriceByProduct(Goods)" 
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+	,CASE
+		WHEN
+			(CASE
+				WHEN 
+					map.TreatmentCategory = '手術' 
+					AND CAST(p.[ANo] AS NVARCHAR(50)) = '0'
+					THEN 0
+				WHEN pi.[SoldOutPrice]=0 then 0
+				WHEN pa.[PackagePrice] = 0 THEN 0
+				ELSE
+					COALESCE(
+							(pi.[SoldOutPrice]/pa.[PackagePrice])*pai.[ItemValue]
+							,pi.[SoldOutPrice]
+					)
+					-H1.GoodsRefundProductWorth --扣掉退貨 
+			END) < 0  
+			THEN 0
+		ELSE
+			(CASE
+				WHEN 
+					map.TreatmentCategory = '手術' 
+					AND CAST(p.[ANo] AS NVARCHAR(50)) = '0'
+					THEN 0
+				WHEN pi.[SoldOutPrice]<=0 then 0
+				WHEN pa.[PackagePrice] = 0 THEN 0
+				ELSE
+					COALESCE(
+							(pi.[SoldOutPrice]/pa.[PackagePrice])*pai.[ItemValue]
+							,pi.[SoldOutPrice]
+					)
+					-H1.GoodsRefundProductWorth --扣掉退貨 
+			END)
+
+		END as "SoldOutPriceByProduct(Used On Table)" --
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+	,p.SoldBy
+	,u.FullNameInChinese as 'SalesName'
+	-- 加入退換貨狀態 ray 20251210
+	,(case
+		when 
+			G1.GoodsExchangeProductWorth  is null 
+			and G1.GoodsExchangeProductQuantity is null
+			and H1.GoodsRefundProductWorth  is null
+			and H1.GoodsRefundQuantity is null
+			then null
+		when 
+			G1.GoodsExchangeProductWorth  is not null 
+			and G1.GoodsExchangeProductQuantity is not null
+			and H1.GoodsRefundProductWorth  is null
+			and H1.GoodsRefundQuantity is null
+			then '換'
+		when 
+			G1.GoodsExchangeProductWorth  is null -- 
+			and G1.GoodsExchangeProductQuantity is null --
+			and H1.GoodsRefundProductWorth  is not null --退
+			and H1.GoodsRefundQuantity is not null --退
+			then '退'
+		ELSE '(異常)'
+		end
+		) as GoodsStatus 
+	,G1.GoodsExchangeProductWorth
+	,isnull(G1.GoodsExchangeProductQuantity,0) as GoodsExchangeProductQuantity --260114 修正成捕0
+	,H1.GoodsRefundProductWorth 
+	,isnull(H1.GoodsRefundQuantity,0) as GoodsRefundQuantity -- Ray251210 --260114 修正成捕0
+	--,G1.BelongToCredit --20260205刪除
+	,cls.ClassChtTitle as 'ClassChtTitle(soes)'
+	,(case
+		when CAST(m.CreateDate as date)=CASt(p.[PurchaseDate] as date)
+		then 'NC'
+		ELSE 'RC'
+		END) AS "NC_RC" --20250204 新增新舊客
+
+FROM
+	[dbo].[SaintEir_Purchase] p
+	LEFT JOIN
+		[dbo].[SaintEir_PurchaseItem] pi ON CAST(p.[PurchaseNo] AS NVARCHAR(50)) = CAST(pi.[BelongToPurchase] AS NVARCHAR(50))
+	LEFT JOIN
+		[dbo].[SaintEir_Package] pa ON CAST(pa.[PackageKeyNo] AS NVARCHAR(50))=CAST(pi.[PurchasePackage] AS NVARCHAR(50))
+	LEFT JOIN
+		[dbo].[SaintEir_PackageItem] pai ON CAST(pai.[BelongToPackage] AS NVARCHAR(50)) = CAST(pa.[PackageKeyNo] AS NVARCHAR(50))
+	LEFT JOIN
+		[dbo].[SaintEir_Product] pro ON CAST(pro.[ProductKeyNo] AS NVARCHAR(50)) =
+			CASE
+				WHEN 
+					not CAST(pi.[PurchasePackage] AS NVARCHAR(50)) is null
+					AND CAST(pi.[PurchaseProduct] AS NVARCHAR(50)) is null
+				THEN CAST(pai.[ProductNo] AS NVARCHAR(50))
+				WHEN
+					CAST(pi.[PurchasePackage] AS NVARCHAR(50)) is null
+					AND NOT CAST(pi.[PurchaseProduct] AS NVARCHAR(50)) is null
+				THEN CAST(pi.[PurchaseProduct] AS NVARCHAR(50))
+			END				
+	LEFT JOIN
+		[dbo].[SaintEir_Branch] b ON CAST(b.[BranchNo] AS NVARCHAR(50)) = CAST(p.[BelongToBranch] AS NVARCHAR(50))
+	LEFT JOIN
+		[dbo].[ProductMappingInfo] map ON CAST(map.ProductKeyNo AS NVARCHAR(50)) = CAST(pro.ProductKeyNo AS NVARCHAR(50))
+	LEFT JOIN
+		[dbo].[PRO2E_AUTH_LOGIN_USER] u ON CAST(u.UserId AS NVARCHAR(50)) = CAST(p.SoldBy AS NVARCHAR(50))
+	LEFT JOIN
+		[dbo].[SaintEir_Member] m ON CAST(m.MemberNo AS NVARCHAR(50)) = CAST(p.ByMember AS NVARCHAR(50))
+	--換貨
+	LEFT JOIN G1 
+		on G1.BelongToPurchaseItem= pi.[PurchaseItemNo] AND G1.BelongToProduct = pro.[ProductKeyNo]
+    --退貨
+	LEFT JOIN H1 
+		on H1.BelongToPurchaseItem=pi.[PurchaseItemNo] AND H1.BelongToProduct=pro.[ProductKeyNo]
+	LEFT JOIN SaintEir_Classify cls ON cls.ClassNo = pro.BelongToClassify
+	/*
+	LEFT JOIN Consumption 
+		on Consumption.BelongToPurchaseItem = pi.PurchaseItemNo AND Consumption.ConsumptionProduct = pro.[ProductKeyNo]
+	*/
+WHERE
+	YEAR(p.[PurchaseDate]) >= YEAR(GETDATE()) - 3
+	AND p.Flag =1　　　　　　　　　　　　　-- Ray 20251112
+	--AND p.[PurchaseNo]=1044225
+	--AND pi.[SoldOutPrice] >0				-- Ray 202511120
+	--AND map.TreatmentItem = '肉毒-Nabota'
+	--AND pi.PurchaseItemNo in (1978641,1983915)
+	--AND map.TreatmentCategory = '手術'
+
+GO
+
+
