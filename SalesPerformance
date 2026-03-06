@@ -1,0 +1,138 @@
+WITH EmployeeFiltered AS
+(
+    SELECT 
+        ur.FullNameInChinese,
+        ur.UserId,
+        ur.AssignBranchNo,
+        b.Name AS Branch_Name,
+        ur.JobTitle,                        
+        CAST(ur.ArrivedDate AS date) AS ArrivedDate,
+        CAST(ur.LeaveDate AS date) AS LeaveDate
+    FROM [dbo].[PRO2E_AUTH_LOGIN_USER] ur
+    LEFT JOIN [dbo].[SaintEir_Branch] b
+        ON ur.AssignBranchNo = b.BranchNo  
+    --LEFT JOIN [dbo].[V_PRO2E_AUTH_USER_IN_ROLE] u ON u.UserId = ur.UserId
+    WHERE 
+        (ur.JobTitle LIKE '%諮詢師%' OR ur.JobTitle LIKE '%副店長%' OR ur.JobTitle LIKE '%美容%')
+        AND (b.Name LIKE '%中壢%' OR b.Name LIKE '%忠孝%' OR b.Name LIKE '%桃園%' 
+             OR b.Name LIKE '%新竹%' OR b.Name LIKE '%台中%' OR b.Name LIKE '%站前%' OR b.Name LIKE '%板橋%')
+        AND b.Name NOT LIKE '%手術中心%'
+        --AND u.RoleName = '基本權限(SE)'
+        --AND ur.FullNameInChinese = '李筱婷'
+),
+AliveEmployeeList AS
+(
+    SELECT 
+        ef.FullNameInChinese,
+        ef.UserId,
+        ef.AssignBranchNo,
+        ef.Branch_Name,
+        ef.JobTitle,
+        ef.ArrivedDate,
+        ef.LeaveDate,
+        CAST(d.date AS date) AS CheckDate
+    FROM EmployeeFiltered ef
+    CROSS APPLY
+    (
+        SELECT date
+        FROM [dbo].[DateSequence]
+        WHERE date >= ef.ArrivedDate
+          AND date < ISNULL(ef.LeaveDate,CAST(GETDATE() AS DATE))
+    ) AS d
+),
+SalesDetail AS
+(
+        SELECT
+            s.BelongToLoginUser
+            ,CAST(s.RewardDate AS DATE) AS RewardDate
+            ,s.BelongToPurchaseItemNo
+            ,d.TreatmentCategory
+            ,d.TreatmentItem AS TreatmentItem
+            ,s.BelongToProduct
+            ,d.ProductKeyNo
+            ,d.Product_Name
+            ,m.IsPrivate
+            --,d.[Total_Number(Convertion)] AS Sales_Total
+            --,d.[Total_Number(Convertion_Goods)] AS Sales_Total_without_refund
+            --,d.SoldOutPriceByProduct
+            --,d.[SoldOutPriceByProduct(Used On Table)]
+            ,s.RewardAmout --獎金分配
+            ,case 
+                when s.RewardSign=1 then s.AchievementAmount -- 業績比重
+                when s.RewardSign=2 then s.AchievementAmount*(-1)
+            END as AchievementAmount
+
+            /*ROW_NUMBER() OVER (
+                PARTITION BY s.BelongToPurchaseItemNo, s.BelongToProduct
+                ORDER BY SUM(s.RewardAmout) DESC
+            ) AS rn*/
+        FROM [AnalysisDB].[dbo].[SaintEir_SaleReward] s
+        LEFT JOIN [AnalysisDB].[Advanced_Analyst].[PurchaseDetail] d
+            ON s.BelongToPurchaseItemNo = d.PurchaseItemNo
+           AND s.BelongToProduct = d.ProductKeyNo
+        LEFT JOIN [dbo].[ProductMappingInfo] m
+            ON d.ProductKeyNo = m.ProductKeyNo
+        WHERE s.RewardStatus in (1,2)
+          AND s.RewardSign in (1,2)
+          AND CAST(s.RewardDate AS DATE) >= '2025-01-01' -- 最早日期
+          --AND CAST(s.RewardDate AS DATE) <= '2025-11-30'
+          --AND CAST(s.RewardDate AS DATE) >= '2025-11-01'
+          --AND s.BelongToPurchaseItemNo=1638612
+)
+
+-- ================== UNION ALL ==================
+-- Sales 資料
+SELECT
+    e.CheckDate
+    ,e.UserId
+    ,e.FullNameInChinese
+    ,e.Branch_Name
+    ,e.JobTitle
+    ,e.ArrivedDate
+    ,e.LeaveDate
+    ,s.RewardDate
+    ,s.TreatmentCategory
+    ,s.TreatmentItem
+    ,s.ProductKeyNo
+    ,s.Product_Name
+    ,s.IsPrivate
+    ,COUNT(DISTINCT s.BelongToPurchaseItemNo) AS CountOfPurchaseItemNo
+ --   s.Qty,
+ --   s.Qty_without_refund,
+ --   s.SoldOutPriceByProduct,
+ --   s.[SoldOutPriceByProduct(Used On Table)],
+     ,sum(s.RewardAmout) as RewardAmout --獎金分配
+     ,sum(s.AchievementAmount) as AchievementAmount  -- 業績比重
+     ,'Sales' AS SalesOrUse
+FROM AliveEmployeeList e
+LEFT JOIN SalesDetail s
+    ON e.UserId = s.BelongToLoginUser
+    AND e.CheckDate = s.RewardDate
+--AND e.FullNameInChinese = '張婉亭' --查詢該人員銷售量
+
+Group by
+    e.CheckDate
+    ,e.UserId
+    ,e.FullNameInChinese
+    ,e.Branch_Name
+    ,e.JobTitle
+    ,e.ArrivedDate
+    ,e.LeaveDate
+    ,s.RewardDate
+    ,s.TreatmentCategory
+    ,s.TreatmentItem
+    ,s.ProductKeyNo
+    ,s.Product_Name
+    ,s.IsPrivate
+
+/*ORDER BY 
+    e.CheckDate
+    ,e.UserId
+    ,s.TreatmentCategory
+    ,s.TreatmentItem
+    ,s.ProductKeyNo
+    ,s.Product_Name*/
+
+GO
+
+
