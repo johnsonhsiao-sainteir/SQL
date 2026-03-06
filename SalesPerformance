@@ -10,15 +10,15 @@ WITH EmployeeFiltered AS
         CAST(ur.LeaveDate AS date) AS LeaveDate
     FROM [dbo].[PRO2E_AUTH_LOGIN_USER] ur
     LEFT JOIN [dbo].[SaintEir_Branch] b
-        ON ur.AssignBranchNo = b.BranchNo  
-    --LEFT JOIN [dbo].[V_PRO2E_AUTH_USER_IN_ROLE] u ON u.UserId = ur.UserId
+        ON ur.AssignBranchNo = b.BranchNo                 
     WHERE 
-        (ur.JobTitle LIKE '%諮詢師%' OR ur.JobTitle LIKE '%副店長%' OR ur.JobTitle LIKE '%美容%')
-        AND (b.Name LIKE '%中壢%' OR b.Name LIKE '%忠孝%' OR b.Name LIKE '%桃園%' 
-             OR b.Name LIKE '%新竹%' OR b.Name LIKE '%台中%' OR b.Name LIKE '%站前%' OR b.Name LIKE '%板橋%')
-        AND b.Name NOT LIKE '%手術中心%'
-        --AND u.RoleName = '基本權限(SE)'
-        --AND ur.FullNameInChinese = '李筱婷'
+    1=1
+    AND (ur.JobTitle LIKE '%諮詢師%' OR ur.JobTitle LIKE '%副店長%' OR ur.JobTitle = '美容顧問' OR ur.JobTitle LIKE '%美容組長%' OR ur.JobTitle LIKE '%美容副組長%' OR ur.JobTitle LIKE '%高級美容師%') -- 20260130加入高級美容師
+    AND (b.Name LIKE '%中壢%' OR b.Name LIKE '%忠孝%' OR b.Name LIKE '%桃園%' 
+            OR b.Name LIKE '%新竹%' OR b.Name LIKE '%台中%' OR b.Name LIKE '%站前%' OR b.Name LIKE '%板橋%')
+    AND b.Name NOT LIKE '%手術中心%'
+    AND FullNameInChinese NOT LIKE '%支援%' --20260123加入，排除不具名支援人員
+    AND FullNameInChinese NOT LIKE '%靜止戶%'--20260130加入，排除靜止戶
 ),
 AliveEmployeeList AS
 (
@@ -36,103 +36,426 @@ AliveEmployeeList AS
     (
         SELECT date
         FROM [dbo].[DateSequence]
-        WHERE date >= ef.ArrivedDate
-          AND date < ISNULL(ef.LeaveDate,CAST(GETDATE() AS DATE))
+        WHERE 
+        1=1
+        AND date >= ef.ArrivedDate
+        AND date <= ISNULL(ef.LeaveDate,'2100-12-31')
+        AND date >= DATEADD(MONTH, DATEDIFF(MONTH, 0, GETDATE()) -12, 0)    --縮小資料時間區間為3個月前
     ) AS d
 ),
-SalesDetail AS
-(
-        SELECT
-            s.BelongToLoginUser
-            ,CAST(s.RewardDate AS DATE) AS RewardDate
-            ,s.BelongToPurchaseItemNo
-            ,d.TreatmentCategory
-            ,d.TreatmentItem AS TreatmentItem
-            ,s.BelongToProduct
-            ,d.ProductKeyNo
-            ,d.Product_Name
-            ,m.IsPrivate
-            --,d.[Total_Number(Convertion)] AS Sales_Total
-            --,d.[Total_Number(Convertion_Goods)] AS Sales_Total_without_refund
-            --,d.SoldOutPriceByProduct
-            --,d.[SoldOutPriceByProduct(Used On Table)]
-            ,s.RewardAmout --獎金分配
-            ,case 
-                when s.RewardSign=1 then s.AchievementAmount -- 業績比重
-                when s.RewardSign=2 then s.AchievementAmount*(-1)
-            END as AchievementAmount
 
-            /*ROW_NUMBER() OVER (
-                PARTITION BY s.BelongToPurchaseItemNo, s.BelongToProduct
-                ORDER BY SUM(s.RewardAmout) DESC
-            ) AS rn*/
+FilteredPurchase AS (
+    -- 核心優化：不要在 SELECT 裡 CAST 欄位，保留原始格式供後續 JOIN 使用
+    SELECT 
+        PurchaseDate,
+        BranchNo,
+        SoldBy,
+        CustomerName,
+        CustomerBirthday, 
+        PurchaseNo,
+        PurchaseItemNo,
+        ProductKeyNo,
+        TreatmentCategory, 
+        Total_Number,
+        [Total_Number(Convertion)],
+        [Total_Number(Convertion_Goods)],
+        ANo,
+        TreatmentItem,
+        Product_Name,
+        SoldOutPrice
+    FROM [Advanced_Analyst].[PurchaseDetail]
+    -- 核心優化：保持欄位純淨，確保索引生效
+    WHERE PurchaseDate >= DATEADD(MONTH, DATEDIFF(MONTH, 0, GETDATE()) - 3, 0)
+),
+
+EmployeeSalesQtyWithRN AS
+(
+    SELECT *
+    FROM (
+        SELECT
+            CAST(d.PurchaseDate AS DATE) AS PurchaseDate,
+            CAST(s.RewardDate AS DATE) AS RewardDate,
+            s.BelongToLoginUser,
+            d.CustomerName,
+            d.CustomerBirthday, --20260130新增，更快速於SEOS識別查詢同名同姓消費者
+            --s.BelongToPurchaseItemNo,
+            --s.BelongToProduct,
+            d.PurchaseNo, --20260205新增
+            d.PurchaseItemNo,
+            d.ProductKeyNo,
+            d.TreatmentCategory,
+            d.TreatmentItem AS TreatmentItem,
+            m.ProductName, -- 20260130因應顏寧銷售稽核需計算高級美容師重點產品銷售量，加入產品名稱欄位
+            m.IsPrivate,
+            d.[Total_Number(Convertion)] AS Sales_Total,
+            d.[Total_Number(Convertion_Goods)] AS Sales_Total_without_refund,
+            --SUM(s.RewardAmout) AS RewardAmount, --20260204取消SUM
+            s.RewardAmout, --20260204取消SUM
+            ROW_NUMBER() OVER (
+                PARTITION BY d.PurchaseItemNo, 
+                             d.ProductKeyNo,
+                             d.PurchaseDate --20260112 諮詢師會議修正
+                             --CAST(s.RewardDate AS DATE)
+                ORDER BY 
+                    CAST(s.RewardDate AS DATE) ASC, --20260112 諮詢師會議修正
+                    s.RewardAmout DESC
+            ) AS rn
         FROM [AnalysisDB].[dbo].[SaintEir_SaleReward] s
-        LEFT JOIN [AnalysisDB].[Advanced_Analyst].[PurchaseDetail] d
+        LEFT JOIN FilteredPurchase d
             ON s.BelongToPurchaseItemNo = d.PurchaseItemNo
            AND s.BelongToProduct = d.ProductKeyNo
         LEFT JOIN [dbo].[ProductMappingInfo] m
             ON d.ProductKeyNo = m.ProductKeyNo
-        WHERE s.RewardStatus in (1,2)
-          AND s.RewardSign in (1,2)
-          AND CAST(s.RewardDate AS DATE) >= '2025-01-01' -- 最早日期
-          --AND CAST(s.RewardDate AS DATE) <= '2025-11-30'
-          --AND CAST(s.RewardDate AS DATE) >= '2025-11-01'
-          --AND s.BelongToPurchaseItemNo=1638612
+        WHERE 
+        1=1 
+        AND s.RewardStatus = 1 -- RewardSign = 加減項 1正2負
+        AND s.RewardSign = 1 --RewardStatus = 獎金狀態用來區分主要領獎金對象及服務代理，1:主要獎金 2:服務代理 3:退費扣回
+        AND (d.TreatmentItem IN ('微整-蒙娜麗莎','高雷-IG電波','高雷-Z音波','高雷-Micools','高雷-Coresculpt核心肌塑','高雷-閨蜜電波','高雷-超玩美','微整-逆時針','微整-喬雅登 Voluma','高雷-立線音波','微整-水光針')
+        OR d.Product_Name IN('璀瑟intime-清新噴霧50ml','璀瑟ROYALE-皇家金萃修護安瓶 - 8ml','璀瑟 ROYALE-皇家金萃修護安瓶 - 8ml (方)','雪妍萃EX'))-- 20260130因應顏寧銷售稽核需計算高級美容師重點產品銷售量，加入稽核產品項目
+        /*GROUP BY
+            s.BelongToLoginUser,
+            CAST(s.RewardDate AS DATE),
+            s.BelongToPurchaseItemNo,
+            d.TreatmentCategory,
+            d.TreatmentItem,
+            m.ProductName, -- 20260130因應顏寧銷售稽核需計算高級美容師重點產品銷售量，加入產品名稱欄位
+            s.BelongToProduct,
+            d.ProductKeyNo,
+            d.PurchaseItemNo,
+            d.PackageNo,
+            d.PurchaseDate,
+            m.IsPrivate, 
+            d.CustomerName,
+            d.CustomerBirthday, --20260130新增，更快速於SEOS識別查詢同名同姓消費者
+            d.[Total_Number(Convertion)],
+            d.[Total_Number(Convertion_Goods)]*/  ----20260204取消SUM，移除GROUP BY
+    ) AS s_inner
+    WHERE s_inner.rn = 1
+),
+
+AfterExchange AS (
+    SELECT 
+        s.PurchaseDate AS Exchanged_NewPurchaseDate,
+        s.BelongToLoginUser,
+        s.CustomerName,
+        s.RewardAmout,
+        d.CustomerBirthday,
+        d.BranchNo,
+        s.RewardDate,
+        d.PurchaseNo AS Exchanged_NewPurchaseNo,
+        d.PurchaseItemNo AS Exchanged_NewPurchaseItemNo,
+        d.ProductKeyNo AS Exchanged_NewProductKeyNo,
+        d.TreatmentCategory AS Exchanged_NewTreatmentCategory,
+        d.TreatmentItem AS Exchanged_NewTreatmentItem,
+        d.Product_Name AS Exchanged_NewProduct_Name,
+        d.Total_Number AS Exchanged_NewTotal_Number,
+        m.IsPrivate
+    FROM SaintEir_SaleReward s
+    -- 優化：因 WHERE 有過濾 d 欄位，改用 INNER JOIN 效能更好
+    INNER JOIN FilteredPurchase d 
+        ON s.BelongToPurchase = d.PurchaseNo
+        AND s.BelongToProduct = d.ProductKeyNo
+    LEFT JOIN ProductMappingInfo m
+        ON d.ProductKeyNo = m.ProductKeyNo
+    WHERE s.RewardAmout = 0
+      AND s.RewardDate IS NULL
+      AND d.Ano = '0'
+      AND (d.TreatmentItem IN ('微整-蒙娜麗莎','高雷-IG電波','高雷-Z音波','高雷-Micools','高雷-Coresculpt核心肌塑')
+           OR d.Product_Name IN ('璀瑟intime-清新噴霧50ml','璀瑟ROYALE-皇家金萃修護安瓶 - 8ml','璀瑟 ROYALE-皇家金萃修護安瓶 - 8ml (方)','雪妍萃EX'))
+),
+
+BeforeExchange AS (
+    SELECT 
+        d0.PurchaseDate AS BeforeExchangPurchaseDate,
+        d0.BranchNo,
+        d0.SoldBy,
+        d0.CustomerName,
+        d0.CustomerBirthday,
+        d0.PurchaseNo AS BeforeExchangePurchaseNo,
+        d0.PurchaseItemNo AS BeforeExchangPurchaseItemNo,
+        d0.ProductKeyNo AS BeforeExchangeProductKeyNo,
+        d0.TreatmentItem AS BeforeExchangeTreatmentItem,
+        d0.Product_Name AS BeforeExchangeProductName,
+        g.Quantity AS ExchangeQuantity,
+        d2.PurchaseNo AS TargetPurchaseNo,
+        d2.PurchaseItemNo AS Exchanged_NewPurchaseItemNo
+    FROM SaintEir_GoodsExchange g
+    INNER JOIN FilteredPurchase d0 ON g.BelongToProduct = d0.ProductKeyNo AND g.BelongToPurchaseItem = d0.PurchaseItemNo
+    LEFT JOIN SaintEir_Credit c ON g.BelongToPurchase = c.BelongToPurchase
+    LEFT JOIN FilteredPurchase d1 ON c.PurchaseTo = d1.PurchaseNo
+    LEFT JOIN [dbo].[SaintEir_PurchaseItemCredit] pc ON d1.PurchaseItemNo = pc.PurchaseItemFrom
+    LEFT JOIN FilteredPurchase d2 ON pc.PurchaseItemTo = d2.PurchaseItemNo
+),
+
+ExchangeResult_Base AS (
+    SELECT
+        a.BranchNo,
+        a.BelongToLoginUser,
+        a.CustomerName,
+        a.CustomerBirthday,
+        CAST(a.Exchanged_NewPurchaseDate AS DATE) AS Exchanged_NewPurchaseDate,
+        CAST(a.RewardDate AS DATE) AS Exchanged_NewRewardDate,
+        a.Exchanged_NewPurchaseNo,
+        a.Exchanged_NewPurchaseItemNo,
+        a.Exchanged_NewProductKeyNo,
+        a.Exchanged_NewTreatmentCategory,
+        a.Exchanged_NewTreatmentItem,
+        a.Exchanged_NewProduct_Name,
+        a.Exchanged_NewTotal_Number,
+        a.IsPrivate,
+        a.RewardAmout,
+        CAST(b.BeforeExchangPurchaseDate AS DATE) AS BeforeExchangPurchaseDate,
+        b.SoldBy,
+        b.BeforeExchangePurchaseNo,
+        b.BeforeExchangPurchaseItemNo,
+        b.BeforeExchangeProductKeyNo,
+        b.BeforeExchangeProductName,
+        b.ExchangeQuantity,
+        -- 優化：使用 DATEDIFF 判斷同月更精準（考慮跨年情況）
+        CASE WHEN DATEDIFF(MONTH, b.BeforeExchangPurchaseDate, a.Exchanged_NewPurchaseDate) = 0 THEN 1 ELSE 0 END AS Same_month,
+        -- 核心優化：為每筆換貨標記順序，取代 NOT EXISTS
+        ROW_NUMBER() OVER (
+            PARTITION BY a.Exchanged_NewPurchaseItemNo 
+            ORDER BY b.BeforeExchangPurchaseDate DESC
+        ) AS RowNum
+    FROM AfterExchange a
+    INNER JOIN BeforeExchange b ON a.Exchanged_NewPurchaseItemNo = b.Exchanged_NewPurchaseItemNo
+),
+
+-- 最終輸出：只取 RowNum = 1 (即最後一次換貨紀錄)
+ExchangeResult AS(
+SELECT DISTINCT
+    er.BranchNo,
+    er.BelongToLoginUser AS New_Soldby_Id,
+    er.SoldBy AS Old_Soldby_Id,
+    er.BeforeExchangePurchaseNo,
+    er.Exchanged_NewPurchaseNo,
+    er.BeforeExchangPurchaseItemNo,
+    er.Exchanged_NewPurchaseItemNo,
+    u.FullNameInChinese,
+    er.CustomerName,
+    er.CustomerBirthday,
+    er.BeforeExchangPurchaseDate,
+    er.BeforeExchangeProductKeyNo,
+    er.BeforeExchangeProductName,
+    er.ExchangeQuantity,
+    er.Exchanged_NewPurchaseDate,
+    er.Exchanged_NewTreatmentCategory,
+    er.Exchanged_NewTreatmentItem,
+    er.Exchanged_NewProductKeyNo,
+    er.Exchanged_NewProduct_Name,
+    er.Exchanged_NewTotal_Number,
+    er.RewardAmout,
+    er.Exchanged_NewRewardDate,
+    er.IsPrivate,
+    er.Same_month
+FROM ExchangeResult_Base er
+INNER JOIN PRO2E_AUTH_LOGIN_USER u ON er.SoldBy = u.UserId
+WHERE er.RowNum = 1
+),
+
+EmployeeUseQty AS(
+    SELECT
+        d.PurchaseDate,
+        ch.ConsumptionDate AS use_date,
+        d.BranchNo,
+        u.JobTitle,
+        e.BelongToLoginUser AS UserId,
+        u.FullNameInChinese,
+        d.CustomerName,
+        d.CustomerBirthday, --20260130新增，更快速於SEOS識別查詢同名同姓消費者
+        d.PurchaseNo, --20260205新增
+        d.PurchaseItemNo,
+        d.ProductKeyNo,
+        m.TreatmentCategory,
+        m.TreatmentItem,
+        m.ProductName, -- 20260130因應顏寧銷售稽核需計算高級美容師重點產品銷售量，加入產品名稱欄位
+        m.IsPrivate,
+        e.RewardAmout,
+        er.BeforeExchangPurchaseItemNo,
+        er.BeforeExchangeProductKeyNo,
+        ch.Quantity AS use_qty
+    FROM [dbo].[SaintEir_ComsumptionHistory] AS ch
+    LEFT JOIN ExchangeResult er
+        ON ch.BelongToPurchaseItem = er.Exchanged_NewPurchaseItemNo
+        AND ch.ConsumptionProduct = er.Exchanged_NewProductKeyNo
+    LEFT JOIN FilteredPurchase d 
+        ON ch.ConsumptionProduct = d.ProductKeyNo
+        AND ch.BelongToPurchaseItem = d.PurchaseItemNo
+    LEFT JOIN [dbo].[ProductMappingInfo] m
+        ON d.ProductKeyNo = m.ProductKeyNo
+    LEFT JOIN EmployeeSalesQtyWithRN e 
+        ON e.ProductKeyNo = COALESCE(er.BeforeExchangeProductKeyNo, ch.ConsumptionProduct)
+        AND e.PurchaseItemNo = COALESCE(er.BeforeExchangPurchaseItemNo, ch.BelongToPurchaseItem)
+    LEFT JOIN [dbo].[PRO2E_AUTH_LOGIN_USER] AS u
+        ON e.BelongToLoginUser = u.UserId
+    WHERE
+    1=1
+    AND d.ProductKeyNo IN('3916','4264','4270')
+    AND d.SoldOutPrice > 0
+    AND ch.flag = 1
+),
+
+SalesAgg AS
+(
+    SELECT 
+        RewardDate AS RewardOrUseDate,
+        PurchaseDate,
+        BelongToLoginUser,
+        CustomerName,
+        CustomerBirthday,--20260130新增，更快速於SEOS識別查詢同名同姓消費者
+        PurchaseNo, --20260205新增
+        PurchaseItemNo, 
+        ProductKeyNo,
+        TreatmentCategory,
+        TreatmentItem,
+        ProductName, -- 20260130因應顏寧銷售稽核需計算高級美容師重點產品銷售量，加入產品名稱欄位
+        IsPrivate,
+        RewardAmout,
+        SUM(Sales_Total) AS Qty,
+        SUM(Sales_Total_without_refund) AS Qty_without_refund
+    FROM EmployeeSalesQtyWithRN
+    GROUP BY 
+        RewardDate,
+        PurchaseDate,
+        BelongToLoginUser,
+        CustomerName,
+        CustomerBirthday,--20260130新增，更快速於SEOS識別查詢同名同姓消費者
+        PurchaseNo, --20260205新增
+        PurchaseItemNo, 
+        ProductKeyNo,
+        TreatmentCategory,
+        TreatmentItem,
+        ProductName, -- 20260130因應顏寧銷售稽核需計算高級美容師重點產品銷售量，加入產品名稱欄位
+        IsPrivate,
+        RewardAmout
+),
+
+UseAgg AS
+(
+    SELECT
+        UserId,
+        CAST(use_date AS DATE) AS RewardOrUseDate,
+        PurchaseDate,
+        customername,
+        CustomerBirthday,--20260130新增，更快速於SEOS識別查詢同名同姓消費者
+        PurchaseNo, --20260205新增
+        PurchaseItemNo,
+        ProductKeyNo,
+        TreatmentCategory,
+        TreatmentItem,
+        ProductName,-- 20260130因應顏寧銷售稽核需計算高級美容師重點產品銷售量，加入產品名稱欄位
+        IsPrivate,
+        use_qty AS Qty,
+        RewardAmout
+    FROM EmployeeUseQty
+),
+
+-- ================== 最終輸出 ==================
+--銷售量(含退換貨Qty_without_refund)
+CombineAll AS(
+SELECT
+    e.CheckDate,
+    PurchaseDate,
+    RewardOrUseDate,
+    e.UserId,
+    e.FullNameInChinese,
+    e.Branch_Name,
+    e.JobTitle,
+    e.ArrivedDate,
+    e.LeaveDate,
+    s.CustomerName,
+    s.CustomerBirthday,--20260130新增，更快速於SEOS識別查詢同名同姓消費者
+    TreatmentCategory,
+    TreatmentItem,
+    ProductName,-- 20260130因應顏寧銷售稽核需計算高級美容師重點產品銷售量，加入產品名稱欄位
+    PurchaseNo, --20260205新增
+    ProductKeyNo,
+    IsPrivate,
+    ISNULL(s.Qty, 0) AS Qty, 
+    ISNULL(s.Qty_without_refund, 0) AS Qty_without_refund,
+    'Sales' AS SalesOrUse,
+    RewardAmout,
+    NULL AS Same_month
+FROM AliveEmployeeList e
+LEFT JOIN SalesAgg s
+    ON e.UserId = s.BelongToLoginUser
+    AND e.CheckDate = s.RewardOrUseDate
+
+UNION
+
+--操作量
+SELECT
+    e.CheckDate,
+    PurchaseDate,
+    RewardOrUseDate,
+    e.UserId,
+    e.FullNameInChinese,
+    e.Branch_Name,
+    e.JobTitle,
+    e.ArrivedDate,
+    e.LeaveDate,
+    CustomerName,
+    CustomerBirthday,--20260130新增，更快速於SEOS識別查詢同名同姓消費者
+    TreatmentCategory,
+    TreatmentItem,
+    ProductName,-- 20260130因應顏寧銷售稽核需計算高級美容師重點產品銷售量，加入產品名稱欄位
+    PurchaseNo, --20260205新增
+    ProductKeyNo,
+    IsPrivate,
+    ISNULL(Qty, 0) AS Qty,
+    NULL AS Qty_without_refund,
+   'Use' AS SalesOrUse,
+   RewardAmout,
+   NULL AS Same_month
+FROM AliveEmployeeList e
+LEFT JOIN UseAgg uq
+    ON e.UserId = uq.UserId
+    AND e.CheckDate = uq.RewardOrUseDate
+
+UNION
+
+--20260209新增同月換貨加回
+SELECT
+    e.CheckDate,
+    er.Exchanged_NewPurchaseDate,
+    er.Exchanged_NewRewardDate,
+    e.UserId,
+    e.FullNameInChinese,
+    e.Branch_Name,
+    e.JobTitle,
+    e.ArrivedDate,
+    e.LeaveDate,
+    er.CustomerName,
+    er.CustomerBirthday,--20260130新增，更快速於SEOS識別查詢同名同姓消費者
+    er.Exchanged_NewTreatmentCategory,
+    er.Exchanged_NewTreatmentItem,
+    er.Exchanged_NewProduct_Name,-- 20260130因應顏寧銷售稽核需計算高級美容師重點產品銷售量，加入產品名稱欄位
+    er.Exchanged_NewPurchaseNo, --20260205新增
+    er.Exchanged_NewProductKeyNo,
+    er.IsPrivate,
+    ISNULL(er.Exchanged_NewTotal_Number, 0) AS Qty, 
+    NULL AS Qty_without_refund,
+    'Sales(Exchanged)' AS SalesOrUse,
+    er.RewardAmout,
+    er.Same_month
+FROM AliveEmployeeList e
+LEFT JOIN ExchangeResult er
+ON e.CheckDate = er.Exchanged_NewPurchaseDate
+AND e.UserId = er.Old_Soldby_Id --20260304避免消費者將商品轉讓給其他消費者時時，銷售人員更換導致原銷售人員銷售量未被加回
 )
 
--- ================== UNION ALL ==================
--- Sales 資料
-SELECT
-    e.CheckDate
-    ,e.UserId
-    ,e.FullNameInChinese
-    ,e.Branch_Name
-    ,e.JobTitle
-    ,e.ArrivedDate
-    ,e.LeaveDate
-    ,s.RewardDate
-    ,s.TreatmentCategory
-    ,s.TreatmentItem
-    ,s.ProductKeyNo
-    ,s.Product_Name
-    ,s.IsPrivate
-    ,COUNT(DISTINCT s.BelongToPurchaseItemNo) AS CountOfPurchaseItemNo
- --   s.Qty,
- --   s.Qty_without_refund,
- --   s.SoldOutPriceByProduct,
- --   s.[SoldOutPriceByProduct(Used On Table)],
-     ,sum(s.RewardAmout) as RewardAmout --獎金分配
-     ,sum(s.AchievementAmount) as AchievementAmount  -- 業績比重
-     ,'Sales' AS SalesOrUse
-FROM AliveEmployeeList e
-LEFT JOIN SalesDetail s
-    ON e.UserId = s.BelongToLoginUser
-    AND e.CheckDate = s.RewardDate
---AND e.FullNameInChinese = '張婉亭' --查詢該人員銷售量
-
-Group by
-    e.CheckDate
-    ,e.UserId
-    ,e.FullNameInChinese
-    ,e.Branch_Name
-    ,e.JobTitle
-    ,e.ArrivedDate
-    ,e.LeaveDate
-    ,s.RewardDate
-    ,s.TreatmentCategory
-    ,s.TreatmentItem
-    ,s.ProductKeyNo
-    ,s.Product_Name
-    ,s.IsPrivate
-
-/*ORDER BY 
-    e.CheckDate
-    ,e.UserId
-    ,s.TreatmentCategory
-    ,s.TreatmentItem
-    ,s.ProductKeyNo
-    ,s.Product_Name*/
-
+SELECT DISTINCT
+*
+FROM CombineAll
+WHERE
+1=1
+--AND FullNameInChinese = '饒婉茹'
+--AND JobTitle = '高級美容師'
+--AND TreatmentItem = '高雷-Coresculpt核心肌塑'
+--AND CheckDate >= '2025-09-01'
+--AND CheckDate <= '2026-02-28'
+--AND CustomerName = '楊純宜';
 GO
 
 
