@@ -1,0 +1,34 @@
+USE [AnalysisDB]
+GO
+
+/****** Object:  View [Advanced_Analyst].[NewCustomerSource]    Script Date: 2026/3/6 下午 09:04:21 ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+ALTER VIEW [Advanced_Analyst].[NewCustomerSource]
+AS
+
+SELECT DISTINCT
+m.BelongToBranch,
+c.Title,
+m.MemberNo,
+CAST(m.CreateDate AS DATE) AS CreateDate
+  
+FROM [dbo].[WhereToGetInfoOtherList] w
+LEFT JOIN [dbo].[SaintEir_Member] m
+ON w.BelongToMember = m.MemberNo
+LEFT JOIN [dbo].[SaintEir_CustomCategory] c
+ON w.BelongtoCustomCategory = c.CategoryNo
+LEFT JOIN [dbo].[SaintEir_Branch] b
+ON m.BelongToBranch = b.BranchNo
+WHERE
+1=1
+AND c.CategoryType IN ('Advertising','NetAD','OutdoorAD','TraditionalMedia','WhereToGetInfo','WordOfMouthIntroduction')
+AND DATEDIFF(MONTH, m.CreateDate, GETDATE()) <= 18
+AND m.BelongToBranch IN('SE01','SE03','SE04','SE05','SE08','SE09','SE12')
+GO
+
+
