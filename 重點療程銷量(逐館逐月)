@@ -1,0 +1,74 @@
+DECLARE @Columns NVARCHAR(MAX) = '',       
+        @IsnullColumns NVARCHAR(MAX) = '', 
+        @SQL NVARCHAR(MAX) = '';
+
+DECLARE @TargetProductKey NVARCHAR(50) = '4805'; -- 修改此處產品代碼
+
+-- 1. 抓取該產品「有效成交」的月份 (決定橫向欄位)
+SELECT 
+    @Columns += QUOTENAME(MonthStr) + ',',
+    @IsnullColumns += 'ISNULL(' + QUOTENAME(MonthStr) + ', 0) AS ' + QUOTENAME(MonthStr) + ','
+FROM (
+    SELECT DISTINCT FORMAT(S.PurchaseDate, 'yyyy/MM') AS MonthStr
+    FROM [dbo].[SaintEir_Purchase] S
+    INNER JOIN [dbo].[SaintEir_PurchaseItem] SI ON S.PurchaseNo = SI.BelongToPurchase
+    WHERE SI.PurchaseProduct = @TargetProductKey
+      AND S.[Flag] = 1            -- 有效紀錄
+      AND SI.[SoldOutPrice] > 0   -- 有成交價
+      AND S.PurchaseDate IS NOT NULL
+) AS Months
+ORDER BY MonthStr;
+
+-- 2. 構建動態 SQL
+IF LEN(@Columns) > 0 
+BEGIN
+    SET @Columns = LEFT(@Columns, LEN(@Columns) - 1);
+    SET @IsnullColumns = LEFT(@IsnullColumns, LEN(@IsnullColumns) - 1);
+
+    SET @SQL = '
+    -- 外層：呈現最後結果
+    SELECT 產品名稱, 館別, 初次購買日期, ' + @IsnullColumns + '
+    FROM (
+        -- 中層：結合館別主表與交易數據
+        SELECT 
+            (SELECT TOP 1 NameInChinese FROM [dbo].[SaintEir_Product] WHERE ProductKeyNo = ''' + @TargetProductKey + ''') AS [產品名稱],
+            B.BranchName AS [館別],
+            B.BranchCode AS [SortCode],
+            -- 【修正重點】：使用子查詢精確抓取該館別、該產品「有效」的第一筆日期
+            (SELECT CAST(MIN(S2.PurchaseDate) AS DATE)
+             FROM [dbo].[SaintEir_Purchase] S2
+             INNER JOIN [dbo].[SaintEir_PurchaseItem] SI2 ON S2.PurchaseNo = SI2.BelongToPurchase
+             WHERE S2.BelongToBranch = B.BranchCode 
+               AND SI2.PurchaseProduct = ''' + @TargetProductKey + '''
+               AND S2.[Flag] = 1 
+               AND SI2.[SoldOutPrice] > 0) AS [初次購買日期],
+            FORMAT(S.[PurchaseDate], ''yyyy/MM'') AS [月份],
+            SI.[Quantity]
+        FROM (
+            SELECT ''SE01'' AS BranchCode, ''中壢館'' AS BranchName UNION ALL
+            SELECT ''SE03'', ''忠孝館'' UNION ALL
+            SELECT ''SE04'', ''桃園館'' UNION ALL
+            SELECT ''SE05'', ''新竹館'' UNION ALL
+            SELECT ''SE08'', ''台中館'' UNION ALL
+            SELECT ''SE09'', ''站前館'' UNION ALL
+            SELECT ''SE12'', ''板橋館''
+        ) AS B
+        LEFT JOIN [dbo].[SaintEir_Purchase] S ON S.BelongToBranch = B.BranchCode AND S.[Flag] = 1
+        LEFT JOIN [dbo].[SaintEir_PurchaseItem] SI ON S.PurchaseNo = SI.BelongToPurchase 
+            AND SI.PurchaseProduct = ''' + @TargetProductKey + '''
+            AND SI.[SoldOutPrice] > 0
+    ) AS SourceTable
+    PIVOT (
+        SUM(Quantity)
+        FOR [月份] IN (' + @Columns + ')
+    ) AS PivotTable
+    ORDER BY 
+        CASE [SortCode]
+            WHEN ''SE01'' THEN 1 WHEN ''SE03'' THEN 2 WHEN ''SE04'' THEN 3 
+            WHEN ''SE05'' THEN 4 WHEN ''SE08'' THEN 5 WHEN ''SE09'' THEN 6 WHEN ''SE12'' THEN 7 
+            ELSE 99 END;';
+
+    EXEC sp_executesql @SQL;
+END
+ELSE
+    PRINT '查無有效交易紀錄。';
