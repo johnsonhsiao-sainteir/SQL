@@ -1,0 +1,158 @@
+WITH FilteredPurchase AS (
+    -- 在這裡先挑選必要的欄位，並可以加入時間過濾
+    SELECT 
+        CAST(PurchaseDate AS DATE) AS PurchaseDate,
+        BranchNo,
+        SoldBy,
+        CustomerName,
+        CustomerBirthday,
+        PurchaseNo,
+        PurchaseItemNo,
+        ProductKeyNo,
+		TreatmentCategory,
+		Total_Number,
+		ANo,
+        TreatmentItem,
+        Product_Name
+    FROM [Advanced_Analyst].[PurchaseDetail]
+	--WHERE PurchaseDate >= DATEADD(MONTH, -3, GETDATE())
+	),
+	
+AfterExchange AS(
+	SELECT
+		s.PurchaseDate AS Exchanged_NewPurchaseDate,
+		s.BelongToLoginUser,
+		s.CustomerName,
+        s.RewardAmout,
+		d.CustomerBirthday,
+		d.BranchNo,
+		s.RewardDate,
+		d.PurchaseNo AS Exchanged_NewPurchaseNo,
+		d.PurchaseItemNo AS Exchanged_NewPurchaseItemNo,
+		d.ProductKeyNo AS Exchanged_NewProductKeyNo,
+        d.TreatmentCategory AS Exchanged_NewTreatmentCategory,
+		d.TreatmentItem AS Exchanged_NewTreatmentItem,
+		d.Product_Name AS Exchanged_NewProduct_Name,
+		d.Total_Number AS Exchanged_NewTotal_Number,
+        m.IsPrivate
+	FROM SaintEir_SaleReward s
+	LEFT JOIN FilteredPurchase d
+		ON s.BelongToPurchase = d.PurchaseNo
+		AND s.BelongToProduct = d.ProductKeyNo
+    LEFT JOIN ProductMappingInfo m
+		ON d.ProductKeyNo = m.ProductKeyNo
+	WHERE 
+	1=1
+	AND RewardAmout = 0
+	AND RewardDate IS NULL
+	AND Ano = '0'
+	AND (d.TreatmentItem IN ('微整-蒙娜麗莎','高雷-IG電波','高雷-Z音波','高雷-Micools','高雷-Coresculpt核心肌塑'/*,'高雷-閨蜜電波','高雷-超玩美','微整-逆時針','微整-喬雅登 Voluma','高雷-立線音波','微整-水光針'*/)
+        OR d.Product_Name IN('璀瑟intime-清新噴霧50ml','璀瑟ROYALE-皇家金萃修護安瓶 - 8ml','璀瑟 ROYALE-皇家金萃修護安瓶 - 8ml (方)','雪妍萃EX'))
+),
+
+BeforeExchange AS(
+	SELECT
+		d0.PurchaseDate AS BeforeExchangPurchaseDate,
+		d0.BranchNo,
+		d0.SoldBy,
+		d0.CustomerName,
+		d0.CustomerBirthday,
+		d0.PurchaseNo AS BeforeExchangePurchaseNo,
+		d0.PurchaseItemNo AS BeforeExchangPurchaseItemNo,
+		d0.ProductKeyNo AS BeforeExchangeProductKeyNo,
+		d0.TreatmentItem AS BeforeExchangeTreatmentItem,
+		d0.Product_Name AS BeforeExchangeProductName,
+		g.Quantity AS ExchangeQuantity,
+		d2.PurchaseNo,
+		d2.PurchaseItemNo AS Exchanged_NewPurchaseItemNo
+	FROM SaintEir_GoodsExchange g
+	LEFT JOIN FilteredPurchase d0
+		ON g.BelongToProduct = d0.ProductKeyNo
+		AND g.BelongToPurchaseItem = d0.PurchaseItemNo
+	LEFT JOIN SaintEir_Credit c
+		ON g.BelongToPurchase = c.BelongToPurchase
+	LEFT JOIN FilteredPurchase d1
+		ON c.PurchaseTo = d1.PurchaseNo
+	LEFT JOIN [dbo].[SaintEir_PurchaseItemCredit] pc
+		ON d1.PurchaseItemNo = pc.PurchaseItemFrom
+	LEFT JOIN FilteredPurchase d2
+		ON pc.PurchaseItemTo = d2.PurchaseItemNo
+	--WHERE d2.CustomerName = '楊純宜' 
+),
+
+ExchangeResult AS (
+	SELECT
+		a.BranchNo,
+		a.BelongToLoginUser,
+		a.CustomerName,
+		a.CustomerBirthday,
+		CAST(a.Exchanged_NewPurchaseDate AS DATE) AS Exchanged_NewPurchaseDate,
+		CAST(a.RewardDate AS DATE) AS Exchanged_NewRewardDate,
+		a.Exchanged_NewPurchaseNo,
+		a.Exchanged_NewPurchaseItemNo,
+        a.Exchanged_NewProductKeyNo,
+        a.Exchanged_NewTreatmentCategory,
+		a.Exchanged_NewTreatmentItem,
+		a.Exchanged_NewProduct_Name,
+		a.Exchanged_NewTotal_Number,
+        a.IsPrivate,
+        a.RewardAmout,
+		b.BeforeExchangPurchaseDate,
+		b.SoldBy,
+		b.BeforeExchangePurchaseNo,
+		b.BeforeExchangPurchaseItemNo,
+		b.BeforeExchangeProductName,
+		b.ExchangeQuantity,
+		CASE WHEN month(b.BeforeExchangPurchaseDate) = month(a.Exchanged_NewPurchaseDate) THEN 1
+		ELSE 0 END AS Same_month  --1：同月換貨；0：跨月換貨
+	FROM AfterExchange a
+	INNER JOIN BeforeExchange b
+	    --ON a.CustomerName = b.CustomerName
+	    ON a.Exchanged_NewPurchaseItemNo = b.Exchanged_NewPurchaseItemNo
+	    --AND a.BranchNo = b.BranchNo
+),
+
+ExchangeResult2 AS (SELECT *
+FROM ExchangeResult er
+WHERE NOT EXISTS (
+	SELECT 1
+	FROM ExchangeResult er2
+	WHERE
+    1=1
+      --ANDer.CustomerName = er2.CustomerName
+	  AND er.Exchanged_NewPurchaseItemNo = er2.BeforeExchangPurchaseItemNo
+	  AND er.BeforeExchangPurchaseDate < er2.BeforeExchangPurchaseDate
+	)
+)
+
+SELECT DISTINCT
+er.BranchNo,
+er.BelongToLoginUser AS New_Soldby_Id,
+er.SoldBy AS Old_Soldby_Id,
+er.BeforeExchangePurchaseNo,
+er.Exchanged_NewPurchaseNo,
+er.BeforeExchangPurchaseItemNo,
+er.Exchanged_NewPurchaseItemNo,
+--er.BeforeExchangeProductName,
+u.FullNameInChinese,
+CustomerName,
+CustomerBirthday,
+BeforeExchangPurchaseDate,
+BeforeExchangeProductName,
+ExchangeQuantity,
+Exchanged_NewPurchaseDate,
+Exchanged_NewTreatmentCategory,
+Exchanged_NewTreatmentItem,
+Exchanged_NewProductKeyNo,
+Exchanged_NewProduct_Name,
+Exchanged_NewTotal_Number,
+RewardAmout,
+Exchanged_NewRewardDate,
+IsPrivate,
+Same_month
+FROM ExchangeResult2 er
+INNER JOIN PRO2E_AUTH_LOGIN_USER u
+	ON er.SoldBy = u.UserId
+GO
+
+
