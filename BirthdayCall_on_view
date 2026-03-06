@@ -1,0 +1,95 @@
+USE [AnalysisDB]
+GO
+
+/****** Object:  View [Advanced_Analyst].[Birthdaycall]    Script Date: 2026/3/6 下午 09:08:08 ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+
+ALTER VIEW [Advanced_Analyst].[Birthdaycall]
+AS
+
+-- 1. 先定義基礎簡訊清單
+WITH SMSSendHistory AS (
+    SELECT 
+        s.SMSSendHistoryNo,
+        s.BelongToBranch,
+        m.FullName,
+        m.MemberNo,
+        m.Mobile_1 AS 電話,
+        m.Birthday AS 生日,
+        m.Attendant,--服務人員員編
+        u.FullNameInChinese AS 服務人員,
+        m.CustomerHabit,
+        CAST(m.AnamnesisNo AS VARCHAR(50)) AS 客編,
+        s.Subject AS 主題,
+        s.SMSContent AS 簡訊內容,
+        CAST(s.SendTime AS DATE) AS 預計發送日期, --當月call客名單
+        c.DefaultText AS 狀態,
+        c2.DefaultText AS 說明
+    FROM SaintEir_SMSSendHistory s
+    LEFT JOIN SaintEir_Member m ON s.BelongToCustomer = m.MemberNo
+    LEFT JOIN ControlsDefault c ON s.[Status_SMS] = c.DefaultValue AND c.ControlsGroup = 'SMSStatus'
+    LEFT JOIN ControlsDefault c2 ON s.Status_Every8D = c2.DefaultValue AND c2.ControlsGroup = 'SMSStatus_Every8D'
+    LEFT JOIN [dbo].[PRO2E_AUTH_LOGIN_USER] u ON m.Attendant = u.UserId
+    WHERE s.Flag = 1
+      AND s.Subject LIKE '%birthday%'
+      AND s.BelongToBranch IN ('SE01','SE03','SE04','SE05','SE08','SE09','SE12')
+      AND s.[Status_SMS] IN (1,3) --1：成功，3:處理中
+      AND s.Status_Every8D IN (100, 0) --100：成功，0:處理中
+      AND YEAR(SendTime) = YEAR(GETDATE()) 
+      AND MONTH(SendTime) = MONTH(GETDATE())
+)
+
+SELECT
+*
+FROM (
+    SELECT
+        sh.SMSSendHistoryNo,--PK值
+        sh.FullName AS 會員,
+        sh.BelongToBranch,
+        lp.Branch_Name AS 館別,
+        lp.PurchaseDate AS 最近消費日期,
+        sh.電話,
+        sh.生日,
+        sh.MemberNo,
+        sh.客編,
+        sh.Attendant,
+        sh.服務人員,
+        sh.CustomerHabit,
+        sh.主題,
+        sh.簡訊內容,
+        sh.預計發送日期,
+        sh.狀態,
+        sh.說明,
+        ROW_NUMBER() OVER (
+            PARTITION BY sh.FullName,sh.電話
+            ORDER BY lp.PurchaseDate DESC
+        ) AS rn
+        FROM SMSSendHistory sh
+    CROSS APPLY (
+        SELECT TOP 1 
+            p.Branch_Name,
+            CAST(p.PurchaseDate AS DATE) AS PurchaseDate
+        FROM Advanced_Analyst.PurchaseDetail p
+        WHERE p.ByMember = sh.MemberNo
+        ORDER BY p.PurchaseDate DESC
+    ) lp
+) x
+WHERE 
+1=1
+AND x.rn = 1
+--AND x.會員 = '陳慧媚'
+
+/*ORDER BY
+    x.館別,
+    -- 優先判斷是否為靜止戶：0 為一般，1 為靜止戶（讓 1 排在後面）
+    CASE WHEN x.服務人員 LIKE '%靜止戶%' THEN 1 ELSE 0 END,
+    x.服務人員,
+    x.會員*/
+GO
+
+
