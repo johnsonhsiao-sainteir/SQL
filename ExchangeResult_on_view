@@ -1,7 +1,7 @@
 USE [AnalysisDB]
 GO
 
-/****** Object:  View [Advanced_Analyst].[ExchangeResult]    Script Date: 2026/3/6 下午 08:50:06 ******/
+/****** Object:  View [Advanced_Analyst].[ExchangeResult]    Script Date: 2026/3/6 下午 09:45:24 ******/
 SET ANSI_NULLS ON
 GO
 
@@ -21,11 +21,12 @@ GO
 
 
 
+
+
 ALTER VIEW [Advanced_Analyst].[ExchangeResult]
 AS
 
 WITH FilteredPurchase AS (
-    -- 核心優化：不要在 SELECT 裡 CAST 欄位，保留原始格式供後續 JOIN 使用
     SELECT 
         p.PurchaseDate,
         p.BranchNo,
@@ -123,9 +124,7 @@ ExchangeResult AS (
     FROM(SELECT
         a.PurchaseDate,
         ep.*,
-        -- 優化：使用 DATEDIFF 判斷同月更精準（考慮跨年情況）
         CASE WHEN DATEDIFF(MONTH, ep.BeforeExchangePurchaseDate, ep.AfterExchangePurchaseDate) = 0 THEN 1 ELSE 0 END AS Same_month,
-        -- 核心優化：為每筆換貨標記順序，取代 NOT EXISTS
         ROW_NUMBER() OVER (
             PARTITION BY a.PurchaseItemNo 
             ORDER BY ep.BeforeExchangePurchaseDate DESC
