@@ -1,12 +1,13 @@
 USE [AnalysisDB]
 GO
 
-/****** Object:  View [Advanced_Analyst].[SalesPerformance]    Script Date: 2026/3/6 下午 09:01:24 ******/
+/****** Object:  View [Advanced_Analyst].[SalesPerformance]    Script Date: 2026/3/6 下午 09:39:04 ******/
 SET ANSI_NULLS ON
 GO
 
 SET QUOTED_IDENTIFIER ON
 GO
+
 
 
 
@@ -92,8 +93,8 @@ EmployeeSalesQtyWithRN AS
     SELECT *
     FROM (
         SELECT
-            CAST(d.PurchaseDate AS DATE) AS PurchaseDate,
-            CAST(s.RewardDate AS DATE) AS RewardDate,
+            d.PurchaseDate,
+            s.RewardDate,
             s.BelongToLoginUser,
             d.CustomerName,
             d.CustomerBirthday, --20260130新增，更快速於SEOS識別查詢同名同姓消費者
@@ -112,7 +113,7 @@ EmployeeSalesQtyWithRN AS
                              d.ProductKeyNo,
                              d.PurchaseDate --20260112 諮詢師會議修正
                 ORDER BY 
-                    CAST(s.RewardDate AS DATE) ASC, --20260112 諮詢師會議修正
+                    s.RewardDate ASC, --20260112 諮詢師會議修正
                     s.RewardAmout DESC
             ) AS rn
         FROM [AnalysisDB].[dbo].[SaintEir_SaleReward] s
