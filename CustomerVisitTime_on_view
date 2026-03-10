@@ -1,21 +1,3 @@
-USE [AnalysisDB]
-GO
-
-/****** Object:  View [Advanced_Analyst].[CustomerVisitTime]    Script Date: 2026/3/6 下午 09:02:19 ******/
-SET ANSI_NULLS ON
-GO
-
-SET QUOTED_IDENTIFIER ON
-GO
-
-
-
-
-
-
-ALTER VIEW [Advanced_Analyst].[CustomerVisitTime]
-AS
-
 SELECT DISTINCT
   BelongtoBranch,
   ReservationNo,

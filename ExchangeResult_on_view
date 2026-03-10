@@ -1,31 +1,3 @@
-USE [AnalysisDB]
-GO
-
-/****** Object:  View [Advanced_Analyst].[ExchangeResult]    Script Date: 2026/3/6 下午 09:45:24 ******/
-SET ANSI_NULLS ON
-GO
-
-SET QUOTED_IDENTIFIER ON
-GO
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-ALTER VIEW [Advanced_Analyst].[ExchangeResult]
-AS
-
 WITH FilteredPurchase AS (
     SELECT 
         p.PurchaseDate,
