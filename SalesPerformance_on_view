@@ -1,22 +1,3 @@
-USE [AnalysisDB]
-GO
-
-/****** Object:  View [Advanced_Analyst].[SalesPerformance]    Script Date: 2026/3/6 下午 09:39:04 ******/
-SET ANSI_NULLS ON
-GO
-
-SET QUOTED_IDENTIFIER ON
-GO
-
-
-
-
-
-
-
-
-ALTER VIEW [Advanced_Analyst].[SalesPerformance]
-AS
 WITH EmployeeFiltered AS
 (
     SELECT 
@@ -107,13 +88,13 @@ EmployeeSalesQtyWithRN AS
             d.IsPrivate,
             d.[Total_Number(Convertion)] AS Sales_Total,
             d.[Total_Number(Convertion_Goods)] AS Sales_Total_without_refund,
-            s.RewardAmout, --20260204取消SUM
+            s.RewardAmout,
             ROW_NUMBER() OVER (
                 PARTITION BY d.PurchaseItemNo, 
                              d.ProductKeyNo,
                              d.PurchaseDate --20260112 諮詢師會議修正
                 ORDER BY 
-                    s.RewardDate ASC, --20260112 諮詢師會議修正
+                    CAST(s.RewardDate AS DATE) ASC, --20260112 諮詢師會議修正
                     s.RewardAmout DESC
             ) AS rn
         FROM [AnalysisDB].[dbo].[SaintEir_SaleReward] s
@@ -204,9 +185,7 @@ ExchangeResult AS (
     FROM(SELECT
         a.PurchaseDate,
         ep.*,
-        -- 優化：使用 DATEDIFF 判斷同月更精準（考慮跨年情況）
         CASE WHEN DATEDIFF(MONTH, ep.BeforeExchangePurchaseDate, ep.AfterExchangePurchaseDate) = 0 THEN 1 ELSE 0 END AS Same_month,
-        -- 核心優化：為每筆換貨標記順序，取代 NOT EXISTS
         ROW_NUMBER() OVER (
             PARTITION BY a.PurchaseItemNo 
             ORDER BY ep.BeforeExchangePurchaseDate DESC
@@ -229,7 +208,7 @@ EmployeeUseQty AS(
         u.FullNameInChinese,
         d.CustomerName,
         d.CustomerBirthday, --20260130新增，更快速於SEOS識別查詢同名同姓消費者
-        d.PurchaseNo, --20260205新增
+        d.PurchaseNo,
         d.PurchaseItemNo,
         d.ProductKeyNo,
         m.TreatmentCategory,
@@ -279,7 +258,7 @@ SELECT
     TreatmentCategory,
     TreatmentItem,
     Product_Name,-- 20260130因應顏寧銷售稽核需計算高級美容師重點產品銷售量，加入產品名稱欄位
-    PurchaseNo, --20260205新增
+    PurchaseNo,
     ProductKeyNo,
     IsPrivate,
     ISNULL(s.Sales_Total, 0) AS Qty, 
@@ -310,7 +289,7 @@ SELECT
     TreatmentCategory,
     TreatmentItem,
     ProductName,-- 20260130因應顏寧銷售稽核需計算高級美容師重點產品銷售量，加入產品名稱欄位
-    PurchaseNo, --20260205新增
+    PurchaseNo, 
     ProductKeyNo,
     IsPrivate,
     ISNULL(use_qty, 0) AS Qty,
@@ -341,7 +320,7 @@ SELECT
     er.AfterExchangeTreatmentCategory,
     er.AfterExchangeTreatmentItem,
     er.AfterExchangeProductName,-- 20260130因應顏寧銷售稽核需計算高級美容師重點產品銷售量，加入產品名稱欄位
-    er.AfterExchangePurchaseNo, --20260205新增
+    er.AfterExchangePurchaseNo,
     er.AfterExchangeProductKeyNo,
     er.AfterExchangeIsPrivate,
     ISNULL(er.AfterExchangeQty, 0) AS Qty, 
@@ -360,12 +339,12 @@ SELECT DISTINCT
 FROM CombineAll
 WHERE
 1=1
---AND FullNameInChinese = '饒婉茹'
+--AND FullNameInChinese = '曾千珮'
 --AND JobTitle = '高級美容師'
 --AND TreatmentItem = '高雷-Coresculpt核心肌塑'
---AND CheckDate >= '2026-02-01'
---AND CheckDate <= '2026-02-28'
---AND CustomerName IN ('楊純宜','陳佩芳');
+--AND CheckDate >= '2025-07-01'
+--AND CheckDate <= '2025-07-04'
+--AND CustomerName IN ('林婉如');
 GO
 
 
